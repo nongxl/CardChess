@@ -1,0 +1,245 @@
+#include "common.h"
+#include <vector>
+#include <algorithm> // 用于 std::max, std::min
+#include <cstdlib>   // 用于 rand()
+
+// ==========================================
+// 1. 基础结构与配置
+// ==========================================
+
+struct Move {
+    Position from;
+    Position to;
+    Move() : from(Position()), to(Position()) {}
+    Move(Position from, Position to) : from(from), to(to) {}
+};
+
+// 位置价值表 (Piece-Square Tables)
+// 这是一个简化的版本，数值代表在此位置的额外加分
+// 数组通常是从上(y=7)到下(y=0)可视化的，所以需要注意坐标映射
+
+// 兵的位置表：越接近底线分越高，中心兵分高
+static const int PAWN_TABLE[8][8] = {
+    { 0,  0,  0,  0,  0,  0,  0,  0}, // y=7 (Black back rank)
+    {50, 50, 50, 50, 50, 50, 50, 50},
+    {10, 10, 20, 30, 30, 20, 10, 10},
+    { 5,  5, 10, 25, 25, 10,  5,  5},
+    { 0,  0,  0, 20, 20,  0,  0,  0},
+    { 5, -5,-10,  0,  0,-10, -5,  5},
+    { 5, 10, 10,-20,-20, 10, 10,  5}, // y=1
+    { 0,  0,  0,  0,  0,  0,  0,  0}  // y=0 (White back rank)
+};
+
+// 马的位置表：鼓励跳向中心，惩罚在角落
+static const int KNIGHT_TABLE[8][8] = {
+    {-50,-40,-30,-30,-30,-30,-40,-50},
+    {-40,-20,  0,  0,  0,  0,-20,-40},
+    {-30,  0, 10, 15, 15, 10,  0,-30},
+    {-30,  5, 15, 20, 20, 15,  5,-30},
+    {-30,  0, 15, 20, 20, 15,  0,-30},
+    {-30,  5, 10, 15, 15, 10,  5,-30},
+    {-40,-20,  0,  5,  5,  0,-20,-40},
+    {-50,-40,-30,-30,-30,-30,-40,-50}
+};
+
+// 获取基础子力值 (数值放大以便计算微弱优势)
+int getPieceValue(PieceType type) {
+    switch (type) {
+        case QUEEN:  return 900;
+        case ROOK:   return 500;
+        case BISHOP: return 330;
+        case KNIGHT: return 320;
+        case PAWN:   return 100;
+        case KING:   return 20000;
+        default:     return 0;
+    }
+}
+
+// 辅助函数：根据颜色和坐标获取位置加分
+// 假设 PAWN_TABLE 是为白棋设计的（下方为底），黑棋需要翻转Y轴读取
+int getPositionBonus(const Piece& piece, int x, int y) {
+    // 数组索引 0 对应 y=7 (顶部), 索引 7 对应 y=0 (底部)
+    // 对于白棋(从下往上): y=0 是 table[7], y=7 是 table[0] -> index = 7 - y
+    // 对于黑棋(从上往下): y=7 是 table[7] (视为底线), y=0 是 table[0] -> index = y
+    
+    int row = (piece.color == WHITE) ? (7 - y) : y;
+    
+    if (piece.type == PAWN) {
+        return PAWN_TABLE[row][x];
+    } else if (piece.type == KNIGHT) {
+        return KNIGHT_TABLE[row][x];
+    }
+    // 可以在这里添加象、车、后的位置表
+    return 0;
+}
+
+// ==========================================
+// 2. 局面评估与辅助函数
+// ==========================================
+
+// 评估整个棋盘的得分 (正数代表 side 优势，负数代表劣势)
+int evaluateBoard(const ChessBoard& board, Color side) {
+    int score = 0;
+    
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            Position pos(x, y);
+            const Piece& piece = board.getPiece(pos);
+            
+            if (!piece.isEmpty()) {
+                // 1. 基础子力分
+                int val = getPieceValue(piece.type);
+                
+                // 2. 位置加成
+                val += getPositionBonus(piece, x, y);
+
+                // 3. 累加分数 (己方加分，敌方减分)
+                if (piece.color == side) {
+                    score += val;
+                } else {
+                    score -= val;
+                }
+            }
+        }
+    }
+    return score;
+}
+
+// 获取某一方当前所有的合法走法
+std::vector<Move> getAllValidMoves(const ChessBoard& board, Color side) {
+    std::vector<Move> moves;
+    
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            Position from(x, y);
+            const Piece& piece = board.getPiece(from);
+            
+            if (!piece.isEmpty() && piece.color == side) {
+                // 为了获取合法走法，需要临时选中棋子
+                // 注意：这里由于不能修改 const board，我们需要拷贝一份
+                // 如果你的 ChessBoard 类有 const 的 getValidMoves(from) 接口更好，
+                // 但根据原代码 source 14，似乎需要先 selectPiece
+                ChessBoard temp = board;
+                if (temp.selectPiece(from)) {
+                    const std::vector<Position>& valid = temp.getValidMoves();
+                    for (const Position& to : valid) {
+                        moves.push_back(Move(from, to));
+                    }
+                }
+            }
+        }
+    }
+    return moves;
+}
+
+// ==========================================
+// 3. Minimax 核心算法 (带 Alpha-Beta 剪枝)
+// ==========================================
+
+// depth: 剩余搜索层数
+// alpha: 目前发现的最好选择的下限 (用于剪枝)
+// beta:  对手目前发现的最好选择的上限 (用于剪枝)
+// isMaximizing: 是否轮到“我方”(side)走棋
+int minimax(ChessBoard board, int depth, int alpha, int beta, bool isMaximizing, Color myColor) {
+    // 1. 递归终止条件：达到深度
+    if (depth == 0) {
+        return evaluateBoard(board, myColor);
+    }
+
+    Color currentPlayer = isMaximizing ? myColor : (myColor == WHITE ? BLACK : WHITE);
+    std::vector<Move> allMoves = getAllValidMoves(board, currentPlayer);
+
+    // 2. 处理无棋可走的情况 (将死或逼和)
+    if (allMoves.empty()) {
+        // 检查当前方是否被将军
+        if (board.isInCheck(currentPlayer)) {
+            // 被将死，返回极小值 (加上 depth 是为了倾向于更晚被杀或更早杀对方)
+            return isMaximizing ? -99999 - depth : 99999 + depth; 
+        }
+        // 逼和 (Stalemate)，返回 0 分
+        return 0;
+    }
+
+    // 3. 递归搜索
+    if (isMaximizing) {
+        int maxEval = -1000000;
+        for (const Move& move : allMoves) {
+            ChessBoard tempBoard = board;
+            tempBoard.movePiece(move.from, move.to);
+            
+            // 递归调用，下一层轮到对手 (isMaximizing = false)
+            int eval = minimax(tempBoard, depth - 1, alpha, beta, false, myColor);
+            
+            maxEval = std::max(maxEval, eval);
+            alpha = std::max(alpha, eval);
+            
+            // Alpha-Beta 剪枝
+            if (beta <= alpha) break;
+        }
+        return maxEval;
+    } else {
+        int minEval = 1000000;
+        for (const Move& move : allMoves) {
+            ChessBoard tempBoard = board;
+            tempBoard.movePiece(move.from, move.to);
+            
+            // 递归调用，下一层轮到我方 (isMaximizing = true)
+            int eval = minimax(tempBoard, depth - 1, alpha, beta, true, myColor);
+            
+            minEval = std::min(minEval, eval);
+            beta = std::min(beta, eval);
+            
+            // Alpha-Beta 剪枝
+            if (beta <= alpha) break;
+        }
+        return minEval;
+    }
+}
+
+// ==========================================
+// 4. AI 入口函数
+// ==========================================
+
+Move chooseAIMove(Color side, const ChessBoard& board) {
+    std::vector<Move> allMoves = getAllValidMoves(board, side);
+    
+    // 如果没有合法走法，返回无效走法
+    if (allMoves.empty()) {
+        return Move(Position(-1, -1), Position(-1, -1));
+    }
+    
+    // 配置搜索深度
+    // 深度 3 意味着 AI 会思考：我走一步 -> 对手回一步 -> 我再走一步
+    // 增加深度会显著变慢，但在 C++ 中 3 或 4 层通常很快
+    const int SEARCH_DEPTH = 3; 
+
+    Move bestMove = allMoves[0];
+    int maxEval = -1000000;
+    
+    // 遍历根节点的所有走法
+    // 这里也可以打乱 allMoves 的顺序，增加开局的随机性
+    if (allMoves.size() > 1) {
+        // 简单打乱一下，避免每次开局完全一样
+        for (size_t i = 0; i < allMoves.size(); ++i) {
+             size_t j = rand() % allMoves.size();
+             std::swap(allMoves[i], allMoves[j]);
+        }
+    }
+
+    for (const Move& move : allMoves) {
+        ChessBoard tempBoard = board;
+        tempBoard.movePiece(move.from, move.to);
+        
+        // 调用 Minimax 计算分值
+        // 下一步轮到对手，所以 isMaximizing = false
+        int eval = minimax(tempBoard, SEARCH_DEPTH - 1, -1000000, 1000000, false, side);
+        
+        // 找到更好的走法
+        if (eval > maxEval) {
+            maxEval = eval;
+            bestMove = move;
+        }
+    }
+    
+    return bestMove;
+}

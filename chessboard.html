@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>国际象棋棋盘</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        #board-layout-chessboard {
+            max-width: 800px;
+            margin: 0 auto;
+            position: relative;
+        }
+        
+        /* 棋盘容器样式 */
+        .chessboard {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            width: 600px;
+            height: 600px;
+            border: 2px solid #333;
+            position: relative;
+        }
+        
+        /* 棋盘格子样式 */
+        .square {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 0;
+        }
+        
+        /* 浅色格子 */
+        .square:nth-child(16n+1),
+        .square:nth-child(16n+3),
+        .square:nth-child(16n+5),
+        .square:nth-child(16n+7),
+        .square:nth-child(16n+10),
+        .square:nth-child(16n+12),
+        .square:nth-child(16n+14),
+        .square:nth-child(16n+16) {
+            background-color: #eeeed2;
+        }
+        
+        /* 深色格子 */
+        .square:nth-child(16n+2),
+        .square:nth-child(16n+4),
+        .square:nth-child(16n+6),
+        .square:nth-child(16n+8),
+        .square:nth-child(16n+9),
+        .square:nth-child(16n+11),
+        .square:nth-child(16n+13),
+        .square:nth-child(16n+15) {
+            background-color: #769656;
+        }
+        
+        /* 棋盘覆盖层 */
+        .board-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            z-index: 20;
+        }
+        
+        /* 棋子基础样式 */
+        .piece {
+            font-size: 50px;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 30;
+        }
+        
+        /* 棋盘坐标 */
+        .coordinate {
+            position: absolute;
+            font-size: 14px;
+            color: #333;
+            font-weight: bold;
+            z-index: 40;
+        }
+        
+        /* 字母坐标（a-h）显示在第1行每个格子的右下角 */
+        .coordinate.file {
+            margin: 0;
+        }
+        
+        /* 数字坐标（1-8）显示在a列每个格子的左上角 */
+        .coordinate.rank {
+            margin: 0;
+        }
+        
+        /* 黑色棋子 */
+        .piece.bp { color: black; }
+        .piece.br { color: black; }
+        .piece.bn { color: black; }
+        .piece.bb { color: black; }
+        .piece.bq { color: black; }
+        .piece.bk { color: black; }
+        
+        /* 白色棋子 */
+        .piece.wp { color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+        .piece.wr { color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+        .piece.wn { color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+        .piece.wb { color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+        .piece.wq { color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+        .piece.wk { color: white; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+    </style>
+</head>
+<body>
+    <div id="board-layout-chessboard" class="board-layout-chessboard board-board">
+        <!-- 棋盘容器 -->
+        <div class="chessboard">
+            <!-- 创建64个棋盘格子 -->
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+            <div class="square"></div>
+        </div>
+        
+        <!-- 行坐标容器 (数字坐标显示在a列左上角) -->
+        <div class="coordinate rank" style="top: 1.5%; left: 1.5%;">8</div>
+        <div class="coordinate rank" style="top: 13%; left: 1.5%;">7</div>
+        <div class="coordinate rank" style="top: 25%; left: 1.5%;">6</div>
+        <div class="coordinate rank" style="top: 38%; left: 1.5%;">5</div>
+        <div class="coordinate rank" style="top: 50%; left: 1.5%;">4</div>
+        <div class="coordinate rank" style="top: 63%; left: 1.5%;">3</div>
+        <div class="coordinate rank" style="top: 75%; left: 1.5%;">2</div>
+        <div class="coordinate rank" style="top: 88%; left: 1.5%;">1</div>
+        
+        <!-- 文件坐标容器 (字母坐标显示在第1行每个格子的右下角) -->
+        <div class="coordinate file" style="left: 11%; top: 97%;">a</div>
+        <div class="coordinate file" style="left: 23.5%; top: 97%;">b</div>
+        <div class="coordinate file" style="left: 36%; top: 97%;">c</div>
+        <div class="coordinate file" style="left: 48.5%; top: 97%;">d</div>
+        <div class="coordinate file" style="left: 61%; top: 97%;">e</div>
+        <div class="coordinate file" style="left: 73.5%; top: 97%;">f</div>
+        <div class="coordinate file" style="left: 86%; top: 97%;">g</div>
+        <div class="coordinate file" style="left: 98.5%; top: 97%;">h</div>
+        
+        <!-- 棋子容器 -->
+        <div class="board-overlay">
+            <!-- 黑方后翼 (第8行) -->
+            <div class="piece br">♜</div>
+            <div class="piece bn">♞</div>
+            <div class="piece bb">♝</div>
+            <div class="piece bq">♛</div>
+            <div class="piece bk">♚</div>
+            <div class="piece bb">♝</div>
+            <div class="piece bn">♞</div>
+            <div class="piece br">♜</div>
+            
+            <!-- 黑方兵 (第7行) -->
+            <div class="piece bp">♟</div>
+            <div class="piece bp">♟</div>
+            <div class="piece bp">♟</div>
+            <div class="piece bp">♟</div>
+            <div class="piece bp">♟</div>
+            <div class="piece bp">♟</div>
+            <div class="piece bp">♟</div>
+            <div class="piece bp">♟</div>
+            
+            <!-- 空行 (第6-3行) -->
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            
+            <!-- 白方兵 (第2行) -->
+            <div class="piece wp">♙</div>
+            <div class="piece wp">♙</div>
+            <div class="piece wp">♙</div>
+            <div class="piece wp">♙</div>
+            <div class="piece wp">♙</div>
+            <div class="piece wp">♙</div>
+            <div class="piece wp">♙</div>
+            <div class="piece wp">♙</div>
+            
+            <!-- 白方后翼 (第1行) -->
+            <div class="piece wr">♖</div>
+            <div class="piece wn">♘</div>
+            <div class="piece wb">♗</div>
+            <div class="piece wq">♕</div>
+            <div class="piece wk">♔</div>
+            <div class="piece wb">♗</div>
+            <div class="piece wn">♘</div>
+            <div class="piece wr">♖</div>
+        </div>
+    </div>
+</body>
+</html>
