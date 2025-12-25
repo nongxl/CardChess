@@ -168,7 +168,8 @@ Move chooseAIMove(Color side, const ChessBoard& board) {
     if (allMoves.empty()) return Move(Position(-1, -1), Position(-1, -1));
 
     // 搜索深度
-    const int SEARCH_DEPTH = 5;
+    // 搜索深度设为3层，评估速度更快，同时也能保持一定的棋力。4耗时有点久，5会重启
+    const int SEARCH_DEPTH = 3;
     
     // 存储所有走法及其评分
     std::vector<ScoredMove> moveScores;
