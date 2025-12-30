@@ -7,6 +7,8 @@
 extern int cursorX;
 extern int cursorY;
 extern ChessBoard chessBoard;
+extern bool isPuzzleMode;
+extern bool isWhitePlayer;
 
 // 棋盘绘制相关常量
 const int BOARD_PADDING = 2;
@@ -37,10 +39,10 @@ void drawBoard(M5Canvas *canvas, const ChessBoard& board, bool isWhiteBottom);
 void drawPiece(M5Canvas *canvas, const Piece& piece, int x, int y);
 
 // 绘制选中的棋子
-void drawSelectedPiece(M5Canvas *canvas, const Position& pos);
+void drawSelectedPiece(M5Canvas *canvas, const Position& pos, bool isWhiteBottom);
 
 // 绘制合法移动
-void drawValidMoves(M5Canvas *canvas, const std::vector<Position>& validMoves);
+void drawValidMoves(M5Canvas *canvas, const std::vector<Position>& validMoves, bool isWhiteBottom);
 
 // 绘制回合信息
 void drawTurnInfo(M5Canvas *canvas, Color currentPlayer);
@@ -67,18 +69,27 @@ void drawBoard(M5Canvas *canvas, const ChessBoard& board, bool isWhiteBottom) {
   for (int y = 0; y < BOARD_SIZE; y++) {
     for (int x = 0; x < BOARD_SIZE; x++) {
       int screenX, screenY;
+      // 使用正确的棋盘坐标绘制格子
       boardToScreen(Position(x, y), screenX, screenY, isWhiteBottom);
       
-      // 计算格子颜色：a1是浅色格子，h8是深色格子
-      // 直接使用棋盘坐标计算，不受棋盘旋转影响
-      bool isLightSquare = ((x + y) % 2 == 0);
+      // 计算格子颜色：基于棋盘坐标，确保符合国际象棋规则
+      // a1 (x=0,y=0) 是黑色，h1 (x=7,y=0) 是白色（右下角）
+      // 颜色计算不受屏幕旋转影响，保持固定的棋盘颜色分布
+      bool isLightSquare = ((x + y) % 2 != 0);
       unsigned short color = isLightSquare ? COLOR_LIGHT_SQUARE : COLOR_DARK_SQUARE;
       
       canvas->fillRect(screenX, screenY, SQUARE_SIZE, SQUARE_SIZE, color);
-      
-      // 绘制棋子
+    }
+  }
+  
+  // 绘制棋子
+  for (int y = 0; y < BOARD_SIZE; y++) {
+    for (int x = 0; x < BOARD_SIZE; x++) {
       const Piece& piece = board.getPiece(x, y);
       if (!piece.isEmpty()) {
+        int screenX, screenY;
+        // 使用正确的棋盘坐标绘制棋子
+        boardToScreen(Position(x, y), screenX, screenY, isWhiteBottom);
         drawPiece(canvas, piece, screenX, screenY);
       }
     }
@@ -233,10 +244,12 @@ Position screenToBoard(int screenX, int screenY, bool isWhiteBottom) {
   int x = boardX / SQUARE_SIZE;
   int y = boardY / SQUARE_SIZE;
   
+  // 根据棋盘朝向调整坐标转换
+  // isWhiteBottom=true: a1在左下角，h8在右上角
+  // isWhiteBottom=false: a8在左下角，h1在右上角
   if (isWhiteBottom) {
     y = BOARD_SIZE - 1 - y;
   } else {
-    // 执黑方时，x轴也需要反转
     x = BOARD_SIZE - 1 - x;
     y = BOARD_SIZE - 1 - y;
   }
@@ -248,12 +261,13 @@ void boardToScreen(const Position& pos, int& screenX, int& screenY, bool isWhite
   int x = pos.x;
   int y = pos.y;
   
+  // 根据棋盘朝向调整坐标转换
+  // isWhiteBottom=true: a1在左下角，h8在右上角
+  // isWhiteBottom=false: a8在左下角，h1在右上角
   if (isWhiteBottom) {
-    // 白方在下，棋盘正常显示（a1在左下角，h8在右上角）
     screenX = BOARD_X + x * SQUARE_SIZE;
     screenY = BOARD_Y + (BOARD_SIZE - 1 - y) * SQUARE_SIZE;
   } else {
-    // 黑方在下，棋盘旋转180度（a1在右上角，h8在左下角）
     screenX = BOARD_X + (BOARD_SIZE - 1 - x) * SQUARE_SIZE;
     screenY = BOARD_Y + y * SQUARE_SIZE;
   }

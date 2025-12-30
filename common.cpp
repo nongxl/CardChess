@@ -517,11 +517,24 @@ bool ChessBoard::movePiece(const Position& from, const Position& to) {
   lastMoveFrom = from;
   lastMoveTo = to;
   
-  // 保存目标位置的棋子（用于PGN生成）
-  Piece targetPiece = getPiece(to);
+  // 保存目标位置的棋子（用于PGN生成和撤销）
+  lastCapturedPiece = getPiece(to);
+  Piece targetPiece = lastCapturedPiece;
   
   // 保存当前吃过路兵目标格（用于吃过路兵验证）
   Position originalEnPassantTarget = enPassantTarget;
+  
+  // 保存所有必要的状态用于撤销
+  wasWhiteKingInCheck = whiteKingInCheck;
+  wasBlackKingInCheck = blackKingInCheck;
+  wasWhiteKingMoved = whiteKingMoved;
+  wasBlackKingMoved = blackKingMoved;
+  wasWhiteRookMoved[0] = whiteRookMoved[0];
+  wasWhiteRookMoved[1] = whiteRookMoved[1];
+  wasBlackRookMoved[0] = blackRookMoved[0];
+  wasBlackRookMoved[1] = blackRookMoved[1];
+  wasEnPassantTarget = enPassantTarget;
+  wasCurrentPlayer = currentPlayer;
   
   // 执行移动
         setPiece(to, fromPiece);
@@ -833,6 +846,132 @@ String ChessBoard::positionToPGN(const Position& pos) const {
   return pgn;
 }
 
+Move ChessBoard::parsePGN(const String& pgn) const {
+  String cleanPGN = pgn;
+  // 移除可能的注释和空格
+  cleanPGN.trim();
+  
+  // 处理王车易位
+  if (cleanPGN.equals("O-O")) {
+    // 短易位
+    if (currentPlayer == WHITE) {
+      // 白方短易位
+      return Move(Position(4, 0), Position(6, 0));
+    } else {
+      // 黑方短易位
+      return Move(Position(4, 7), Position(6, 7));
+    }
+  } else if (cleanPGN.equals("O-O-O")) {
+    // 长易位
+    if (currentPlayer == WHITE) {
+      // 白方长易位
+      return Move(Position(4, 0), Position(2, 0));
+    } else {
+      // 黑方长易位
+      return Move(Position(4, 7), Position(2, 7));
+    }
+  }
+  
+  // 处理升变
+  int equalsIndex = cleanPGN.indexOf('=');
+  bool isPromotion = equalsIndex != -1;
+  String promotionPGN;
+  if (isPromotion) {
+    promotionPGN = cleanPGN.substring(0, equalsIndex);
+  } else {
+    promotionPGN = cleanPGN;
+  }
+  
+  // 解析目标位置（最后两个字符）
+  int targetCol = promotionPGN[promotionPGN.length() - 2] - 'a';
+  int targetRow = promotionPGN[promotionPGN.length() - 1] - '1';
+  Position target(targetCol, targetRow);
+  
+  // 解析棋子类型
+  PieceType pieceType = PAWN;
+  if (promotionPGN.length() > 2 && (promotionPGN[0] >= 'A' && promotionPGN[0] <= 'Z')) {
+    switch (promotionPGN[0]) {
+      case 'N': pieceType = KNIGHT; break;
+      case 'B': pieceType = BISHOP; break;
+      case 'R': pieceType = ROOK; break;
+      case 'Q': pieceType = QUEEN; break;
+      case 'K': pieceType = KING; break;
+      default: pieceType = PAWN; break;
+    }
+  }
+  
+  // 解析吃子和来源信息
+  bool isCapture = promotionPGN.indexOf('x') != -1;
+  int captureIndex = promotionPGN.indexOf('x');
+  
+  // 解析来源信息
+  int sourceCol = -1;
+  int sourceRow = -1;
+  
+  // 检查是否有来源列或行
+  if (promotionPGN.length() > 2) {
+    int pieceIndex = (pieceType != PAWN) ? 1 : 0;
+    int infoStart = pieceIndex;
+    int infoEnd = isCapture ? captureIndex : promotionPGN.length() - 2;
+    
+    if (infoEnd > infoStart) {
+      String info = promotionPGN.substring(infoStart, infoEnd);
+      
+      // 解析来源列
+      if (info.length() > 0 && info[0] >= 'a' && info[0] <= 'h') {
+        sourceCol = info[0] - 'a';
+      }
+      
+      // 解析来源行
+      if (info.length() > 0 && info[info.length() - 1] >= '1' && info[info.length() - 1] <= '8') {
+        sourceRow = info[info.length() - 1] - '1';
+      }
+    }
+  }
+  
+  // 查找匹配的棋子
+  Position source(-1, -1);
+  // 对于黑方，从高行号开始查找，确保选择正确的棋子
+  if (currentPlayer == BLACK) {
+    for (int y = 7; y >= 0; y--) {
+      for (int x = 0; x < 8; x++) {
+        const Piece& piece = board[x][y];
+        if (piece.type == pieceType && piece.color == currentPlayer) {
+          // 检查是否匹配来源信息
+          if ((sourceCol == -1 || x == sourceCol) && (sourceRow == -1 || y == sourceRow)) {
+            // 检查是否可以移动到目标位置
+            if (isMoveValid(Position(x, y), target) && !wouldPutKingInCheck(Position(x, y), target)) {
+              source = Position(x, y);
+              break;
+            }
+          }
+        }
+      }
+      if (source.isValid()) break;
+    }
+  } else {
+    // 白方保持正常顺序
+    for (int y = 0; y < 8; y++) {
+      for (int x = 0; x < 8; x++) {
+        const Piece& piece = board[x][y];
+        if (piece.type == pieceType && piece.color == currentPlayer) {
+          // 检查是否匹配来源信息
+          if ((sourceCol == -1 || x == sourceCol) && (sourceRow == -1 || y == sourceRow)) {
+            // 检查是否可以移动到目标位置
+            if (isMoveValid(Position(x, y), target) && !wouldPutKingInCheck(Position(x, y), target)) {
+              source = Position(x, y);
+              break;
+            }
+          }
+        }
+      }
+      if (source.isValid()) break;
+    }
+  }
+  
+  return Move(source, target);
+}
+
 GameState ChessBoard::getCurrentState() const {
   return currentState;
 }
@@ -949,4 +1088,77 @@ bool ChessBoard::fromFEN(const String& fen) {
   
   deselectPiece();
   return true;
+}
+
+// 验证移动是否合法（公共方法，用于测试）
+bool ChessBoard::validateMove(const Position& from, const Position& to) const {
+  return isMoveValid(from, to) && !wouldPutKingInCheck(from, to);
+}
+
+// 撤销上一步移动
+void ChessBoard::undoMove() {
+  if (!lastMoveFrom.isValid() || !lastMoveTo.isValid()) {
+    return; // 没有可撤销的移动
+  }
+  
+  Piece movedPiece = getPiece(lastMoveTo);
+  
+  // 将棋子放回起始位置
+  setPiece(lastMoveFrom, movedPiece);
+  
+  // 将被吃掉的棋子放回目标位置
+  setPiece(lastMoveTo, lastCapturedPiece);
+  
+  // 恢复状态
+  whiteKingInCheck = wasWhiteKingInCheck;
+  blackKingInCheck = wasBlackKingInCheck;
+  whiteKingMoved = wasWhiteKingMoved;
+  blackKingMoved = wasBlackKingMoved;
+  whiteRookMoved[0] = wasWhiteRookMoved[0];
+  whiteRookMoved[1] = wasWhiteRookMoved[1];
+  blackRookMoved[0] = wasBlackRookMoved[0];
+  blackRookMoved[1] = wasBlackRookMoved[1];
+  enPassantTarget = wasEnPassantTarget;
+  currentPlayer = wasCurrentPlayer;
+  
+  // 特殊处理王车易位的撤销
+  if (movedPiece.type == KING) {
+    int dx = abs(lastMoveTo.x - lastMoveFrom.x);
+    if (dx == 2) {
+      if (movedPiece.color == WHITE) {
+        if (lastMoveTo.x == 6) { // 撤销白王短易位
+          setPiece(Position(7, 0), getPiece(Position(5, 0)));
+          setPiece(Position(5, 0), Piece(NONE, WHITE));
+        } else if (lastMoveTo.x == 2) { // 撤销白王长易位
+          setPiece(Position(0, 0), getPiece(Position(3, 0)));
+          setPiece(Position(3, 0), Piece(NONE, WHITE));
+        }
+      } else {
+        if (lastMoveTo.x == 6) { // 撤销黑王短易位
+          setPiece(Position(7, 7), getPiece(Position(5, 7)));
+          setPiece(Position(5, 7), Piece(NONE, BLACK));
+        } else if (lastMoveTo.x == 2) { // 撤销黑王长易位
+          setPiece(Position(0, 7), getPiece(Position(3, 7)));
+          setPiece(Position(3, 7), Piece(NONE, BLACK));
+        }
+      }
+    }
+  }
+  
+  // 特殊处理吃过路兵的撤销
+  if (movedPiece.type == PAWN) {
+    int dx = abs(lastMoveTo.x - lastMoveFrom.x);
+    int dy = abs(lastMoveTo.y - lastMoveFrom.y);
+    
+    // 检查是否是吃过路兵
+    if (dx == 1 && dy == 1 && lastCapturedPiece.isEmpty()) {
+      // 恢复被吃的兵
+      int direction = (movedPiece.color == WHITE) ? 1 : -1;
+      Position capturedPawnPos(lastMoveTo.x, lastMoveFrom.y);
+      setPiece(capturedPawnPos, Piece(PAWN, (movedPiece.color == WHITE) ? BLACK : WHITE));
+    }
+  }
+  
+  // 取消选择
+  deselectPiece();
 }

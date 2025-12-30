@@ -8,12 +8,7 @@
 // 1. 基础结构与配置
 // ==========================================
 
-struct Move {
-    Position from;
-    Position to;
-    Move() : from(Position()), to(Position()) {}
-    Move(Position from, Position to) : from(from), to(to) {}
-};
+
 
 // 简单的结构体，用来暂存走法和对应的分数
 struct ScoredMove {

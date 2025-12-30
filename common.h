@@ -49,6 +49,22 @@ struct Piece {
   bool isEmpty() const { return type == NONE; }
 };
 
+// 走法结构体
+struct Move {
+  Position from;
+  Position to;
+  
+  Move() : from(Position(-1, -1)), to(Position(-1, -1)) {}
+  Move(Position from, Position to) : from(from), to(to) {}
+  
+  bool isValid() const { return from.isValid() && to.isValid(); }
+  bool operator==(const Move& other) const { return from == other.from && to == other.to; }
+  bool operator!=(const Move& other) const { return !(*this == other); }
+};
+
+// 前向声明
+
+
 // 棋盘类
 class ChessBoard {
 private:
@@ -69,6 +85,17 @@ private:
   Position enPassantTarget;
   Position lastMoveFrom;
   Position lastMoveTo;
+  
+  // 用于撤销移动的状态
+  Piece lastCapturedPiece;
+  bool wasWhiteKingInCheck;
+  bool wasBlackKingInCheck;
+  bool wasWhiteKingMoved;
+  bool wasBlackKingMoved;
+  bool wasWhiteRookMoved[2];
+  bool wasBlackRookMoved[2];
+  Position wasEnPassantTarget;
+  Color wasCurrentPlayer;
   
   // 游戏状态
   GameState currentState;
@@ -101,6 +128,8 @@ private:
   
   // 模拟移动并检查是否会被将军
   bool simulateMoveAndCheckCheck(const Position& from, const Position& to, Color kingColor) const;
+  
+
   
 public:
   ChessBoard();
@@ -161,6 +190,9 @@ public:
   // 位置转PGN字符串
   String positionToPGN(const Position& pos) const;
   
+  // 从PGN字符串解析移动
+  Move parsePGN(const String& pgn) const;
+  
   // 获取当前游戏状态
   GameState getCurrentState() const;
   
@@ -177,6 +209,12 @@ public:
   Position getPromotionPawnPos() const;
   Color getPromotionColor() const;
   PieceType getSelectedPromotionPiece() const;
+  
+  // 验证移动是否合法（公共方法，用于测试）
+  bool validateMove(const Position& from, const Position& to) const;
+  
+  // 撤销上一步移动
+  void undoMove();
 };
 
 // 全局棋盘实例

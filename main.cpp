@@ -1,6 +1,7 @@
 #include <M5Cardputer.h>
 #include "common.h"
 #include "draw_helper.h"
+#include "puzzle.h"
 #include <FS.h>
 #include <SD.h>
 #include <SPI.h>
@@ -18,20 +19,14 @@
 // SD卡状态
 bool sdInitialized = false;
 
+// 键盘键值定义
+#define KEY_TAB 0x2b
+
 // 日志函数
 void logLine(const String& line) {
     Serial.println(line);
 }
 
-
-// Move结构体定义
-struct Move {
-  Position from;
-  Position to;
-  
-  Move() : from(Position()), to(Position()) {}
-  Move(Position from, Position to) : from(from), to(to) {}
-};
 
 // AI相关声明
 extern Move chooseAIMove(Color side, const ChessBoard& board);
@@ -47,6 +42,13 @@ int cursorY = 0;
 bool isGameStarted = false;
 bool isWhitePlayer = true;
 int selectedOption = 0; // 0: white, 1: black, 2: random, 3: load
+
+// 谜题模式相关
+bool isPuzzleMode = false;
+std::vector<Puzzle> puzzles;
+int currentPuzzleIndex = 0;
+Puzzle currentPuzzle;
+int currentMoveIndex = 0;
 
 // AI走棋记录
 Position aiLastMoveFrom = Position(-1, -1); // 记录AI上一步走棋的起始位置
@@ -234,19 +236,19 @@ bool showConfirmDialog(const String& message) {
 // 显示开始界面
 void showStartScreen() {
     canvas->fillScreen(COLOR_BLACK);          // 清空屏幕为黑色背景
-    canvas->setTextSize(2);                   // 设置文本大小为2
+    canvas->setTextSize(1.8f);                // 设置文本大小为1.8
     canvas->setTextColor(COLOR_WHITE);        // 设置默认文本颜色为白色
     canvas->setTextDatum(TC_DATUM);           // 设置文本对齐方式为顶部居中
     
     // 选择提示 - 居中显示在屏幕顶部（120为屏幕中心x坐标）
-    canvas->drawString("Choose to start:", 120, 10);
+    canvas->drawString("Choose to start:", 120, 6);
     
     // 选项布局常量定义 - 统一控制所有选项的位置和间距
     const int OPTION_SPACING = 18;            // 各选项之间的垂直间距（像素）
     const int OPTION_TEXT_X = 120;            // 所有选项文本的x坐标（居中对齐）
-    const int FIXED_ICON_X = 150;              // 图标固定x坐标（所有图标都显示在这个位置）
+    const int FIXED_ICON_X = 156;              // 图标固定x坐标（所有图标都显示在这个位置）
     const int TEXT_VERTICAL_ALIGN = 15;       // 文本和图标的垂直对齐偏移量
-    const int BASE_Y_POS = 35;                 // 第一个选项的基础y坐标
+    const int BASE_Y_POS = 30;                 // 第一个选项的基础y坐标
     
     // 白色选项 - 第1个选项
     canvas->setTextColor(selectedOption == 0 ? COLOR_SELECTED : COLOR_WHITE);
@@ -266,39 +268,51 @@ void showStartScreen() {
     canvas->setTextColor(selectedOption == 2 ? COLOR_SELECTED : COLOR_WHITE);
     canvas->drawString("Random", OPTION_TEXT_X, BASE_Y_POS + OPTION_SPACING * 2);
     // 随机选项的两个棋子图标使用固定x坐标位置
-    int randomY = BASE_Y_POS + OPTION_SPACING * 2 + TEXT_VERTICAL_ALIGN - PIECE_HEIGHT/4 - 3;
+    //int randomY = BASE_Y_POS + OPTION_SPACING * 2 + TEXT_VERTICAL_ALIGN - PIECE_HEIGHT/4 - 3;
     // 计算两个棋子的x坐标，使它们在固定图标位置居中
-    int randomPawnX1 = FIXED_ICON_X - PIECE_WIDTH/4;
-    int randomPawnX2 = FIXED_ICON_X + PIECE_WIDTH/4;
+    //int randomPawnX1 = FIXED_ICON_X - PIECE_WIDTH/4;
+    //int randomPawnX2 = FIXED_ICON_X + PIECE_WIDTH/4;
     // 绘制左侧白色棋子（缩小一半）
-    canvas->pushImage(randomPawnX1, randomY, PIECE_WIDTH/2, PIECE_HEIGHT/2, (uint16_t*)whitePawnData, COLOR_BLACK);
+    //canvas->pushImage(randomPawnX1, randomY, PIECE_WIDTH/2, PIECE_HEIGHT/2, (uint16_t*)whitePawnData, COLOR_BLACK);
     // 绘制右侧黑色棋子（缩小一半，与白色棋子相邻）
-    canvas->pushImage(randomPawnX2, randomY, PIECE_WIDTH/2, PIECE_HEIGHT/2, (uint16_t*)blackPawnData, COLOR_WHITE);
+    //canvas->pushImage(randomPawnX2, randomY, PIECE_WIDTH/2, PIECE_HEIGHT/2, (uint16_t*)blackPawnData, COLOR_WHITE);
     
     // 读取存档选项 - 第4个选项
     canvas->setTextColor(selectedOption == 3 ? COLOR_SELECTED : COLOR_WHITE);
     canvas->drawString("Load", OPTION_TEXT_X, BASE_Y_POS + OPTION_SPACING * 3);
     
-    // 开始提示 - 居中显示在所有选项下方（使用4倍间距）
+    // 谜题模式选项 - 第5个选项
+    canvas->setTextColor(selectedOption == 4 ? COLOR_SELECTED : COLOR_WHITE);
+    canvas->drawString("Puzzle", OPTION_TEXT_X, BASE_Y_POS + OPTION_SPACING * 4);
+    
+    // 开始提示 - 居中显示在所有选项下方（使用5倍间距）
     canvas->setTextColor(COLOR_WHITE);
-    canvas->drawString(";.select|Space play", 120, BASE_Y_POS + OPTION_SPACING * 4);
+    canvas->drawString(";.select|Space play", 120, BASE_Y_POS + OPTION_SPACING * 5);
     
     canvas->pushSprite(0, 0);                 // 将绘制内容显示到屏幕
 }
+
+// 显示谜题选择界面
+
 
 // 绘制游戏界面
 void drawGameScreen() {
     canvas->fillScreen(COLOR_BLACK);
     
+    // 动态设置棋盘朝向：
+    // 普通模式：玩家所执颜色在下
+    // puzzle模式：白方在下（白方视角）
+    bool isWhiteBottom = isPuzzleMode ? true : isWhitePlayer;
+    
     // 绘制棋盘
-    drawBoard(canvas, chessBoard, isWhitePlayer);
+    drawBoard(canvas, chessBoard, isWhiteBottom);
     
     // 绘制AI上一步走棋的起始位置和目标位置
     if ((aiLastMoveFrom.isValid() || aiLastMoveTo.isValid()) && chessBoard.getCurrentState() != PromotionSelecting) {
         // 绘制起始位置（背景高亮）
         if (aiLastMoveFrom.isValid()) {
             int screenX, screenY;
-            boardToScreen(aiLastMoveFrom, screenX, screenY, isWhitePlayer);
+            boardToScreen(aiLastMoveFrom, screenX, screenY, isWhiteBottom);
             
             // 使用背景高亮，类似于升变状态选棋子的样式
             canvas->fillRect(screenX, screenY, SQUARE_SIZE, SQUARE_SIZE, COLOR_SELECTED);
@@ -313,7 +327,7 @@ void drawGameScreen() {
         // 绘制目标位置（背景高亮）
         if (aiLastMoveTo.isValid()) {
             int screenX, screenY;
-            boardToScreen(aiLastMoveTo, screenX, screenY, isWhitePlayer);
+            boardToScreen(aiLastMoveTo, screenX, screenY, isWhiteBottom);
             
             // 使用背景高亮，类似于升变状态选棋子的样式
             canvas->fillRect(screenX, screenY, SQUARE_SIZE, SQUARE_SIZE, COLOR_SELECTED);
@@ -329,8 +343,8 @@ void drawGameScreen() {
     // 绘制选中的棋子和合法移动
     Position selected = chessBoard.getSelectedPiece();
     if (selected.isValid() && chessBoard.getCurrentState() != PromotionSelecting) {
-        drawSelectedPiece(canvas, selected, isWhitePlayer);
-        drawValidMoves(canvas, chessBoard.getValidMoves(), isWhitePlayer);
+        drawSelectedPiece(canvas, selected, isWhiteBottom);
+        drawValidMoves(canvas, chessBoard.getValidMoves(), isWhiteBottom);
     }
     
     // 检查是否处于升变状态
@@ -345,7 +359,7 @@ void drawGameScreen() {
         
         // 计算升变兵在屏幕上的位置
         int pawnScreenX, pawnScreenY;
-        boardToScreen(pawnPos, pawnScreenX, pawnScreenY, isWhitePlayer);
+        boardToScreen(pawnPos, pawnScreenX, pawnScreenY, isWhiteBottom);
         
         // 定义可选的升变棋子类型
         std::vector<PieceType> promotionOptions = {ROOK, KNIGHT, QUEEN, BISHOP};
@@ -383,7 +397,7 @@ void drawGameScreen() {
     } else {
         // 绘制光标
         int screenX, screenY;
-        boardToScreen(Position(cursorX, cursorY), screenX, screenY, isWhitePlayer);
+        boardToScreen(Position(cursorX, cursorY), screenX, screenY, isWhiteBottom);
         
         // 绘制多层边框增强光标可见性
         // 两层黑色边框（外层）- 增加立体感
@@ -406,6 +420,14 @@ void drawGameScreen() {
         drawCheckInfo(canvas, true, Color::BLACK);
     }
     
+    // 在屏幕左上角添加操作提示
+    if (isPuzzleMode) {
+        canvas->setTextColor(COLOR_WHITE, COLOR_BLACK);
+        canvas->setTextSize(1);
+        canvas->drawString("ESC:reset", 28, 7);
+        canvas->drawString("TAB:tip", 22, 19);
+    }
+    
     canvas->pushSprite(0, 0);
 }
 
@@ -419,100 +441,410 @@ void handleKeyInput() {
         lastKeyPressTime = millis();
         
         if (!isGameStarted) {
-            // 开始界面的按键处理
-            if (M5Cardputer.Keyboard.isKeyPressed(' ')) {
-                // 根据选中的选项执行相应操作
-                if (selectedOption == 0) {
-                    // 选择白色
-                    isWhitePlayer = true;
-                } else if (selectedOption == 1) {
-                    // 选择黑色
-                    isWhitePlayer = false;
-                } else if (selectedOption == 2) {
-                    // 随机选择颜色
-                    isWhitePlayer = random(0, 2);
-                } else if (selectedOption == 3) {
-                    // 读取存档
-                    if (sdInitialized && SD.exists(CHESS_SAVE_FILE)) {
-                        if (loadBoardState()) {
-                            isGameStarted = true;
-                            // 加载后重设AI走棋记录
-                            aiLastMoveFrom = Position(-1, -1);
-                            aiLastMoveTo = Position(-1, -1);
-                            // 重绘游戏界面
-                            drawGameScreen();
-                            // 如果现在是AI的回合，AI需要走棋
-                            if (chessBoard.getCurrentPlayer() != (isWhitePlayer ? Color::WHITE : Color::BLACK)) {
-                                delay(500); // 短暂延迟
-                                Color aiColor = chessBoard.getCurrentPlayer();
-                                Move aiMove = chooseAIMove(aiColor, chessBoard);
-                                if (aiMove.from.isValid() && aiMove.to.isValid()) {
-                                    // 记录AI走棋的起始位置和目标位置
-                                    aiLastMoveFrom = aiMove.from;
-                                    aiLastMoveTo = aiMove.to;
-                                    chessBoard.movePiece(aiMove.from, aiMove.to);
-                                    // 保存AI移动后的棋盘状态
-                                    saveBoardState();
-                                    // 重绘游戏界面
-                                    drawGameScreen();
+            if (isPuzzleMode) {
+                // 谜题选择界面的按键处理
+                if (M5Cardputer.Keyboard.isKeyPressed(' ')) {
+                    // 开始选择的谜题
+                    const Puzzle& selectedPuzzle = puzzles[currentPuzzleIndex];
+                    // 加载谜题初始局面
+                    chessBoard.fromFEN(selectedPuzzle.getFEN());
+                    // 根据谜题的当前走棋方设置玩家颜色
+                    isWhitePlayer = (selectedPuzzle.getSideToMove() == Color::WHITE);
+                    isGameStarted = true;
+                    currentMoveIndex = 0;
+                    // 重绘游戏界面
+                    drawGameScreen();
+                    return;
+                } else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+                    // 上箭头 - 选择上一个谜题
+                    currentPuzzleIndex = (currentPuzzleIndex - 1 + puzzles.size()) % puzzles.size();
+                    currentPuzzle = puzzles[currentPuzzleIndex];
+                    chessBoard.fromFEN(currentPuzzle.getFEN());
+                    currentMoveIndex = 0;
+                    drawGameScreen();
+                } else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+                    // 下箭头 - 选择下一个谜题
+                    currentPuzzleIndex = (currentPuzzleIndex + 1) % puzzles.size();
+                    currentPuzzle = puzzles[currentPuzzleIndex];
+                    chessBoard.fromFEN(currentPuzzle.getFEN());
+                    currentMoveIndex = 0;
+                    drawGameScreen();
+                } else if (M5Cardputer.Keyboard.isKeyPressed('B')) {
+                    // B键返回主菜单
+                    isPuzzleMode = false;
+                    showStartScreen();
+                }
+            } else {
+                // 开始界面的按键处理
+                if (M5Cardputer.Keyboard.isKeyPressed(' ')) {
+                    // 根据选中的选项执行相应操作
+                    if (selectedOption == 0) {
+                        // 选择白色
+                        isWhitePlayer = true;
+                    } else if (selectedOption == 1) {
+                        // 选择黑色
+                        isWhitePlayer = false;
+                    } else if (selectedOption == 2) {
+                        // 随机选择颜色
+                        isWhitePlayer = random(0, 2);
+                    } else if (selectedOption == 3) {
+                        // 读取存档 - 首先初始化SD卡
+                        if (!initializeSDCard()) {
+                            // SD卡初始化失败，显示错误信息
+                            canvas->fillScreen(COLOR_BLACK);
+                            canvas->setTextColor(COLOR_WHITE);
+                            canvas->setTextSize(1);
+                            canvas->setTextDatum(CC_DATUM);
+                            canvas->drawString("SDCard not found", 120, 60);
+                            canvas->drawString("Press any key to return", 120, 80);
+                            canvas->pushSprite(0, 0);
+                            
+                            // 首先等待所有按键释放，清除当前按键状态
+                            bool anyKeyPressed = true;
+                            while (anyKeyPressed) {
+                                M5Cardputer.update();
+                                anyKeyPressed = false;
+                                
+                                // 检查字母键
+                                for (int i = 0; i < 26; i++) {
+                                    if (M5Cardputer.Keyboard.isKeyPressed('a' + i) || M5Cardputer.Keyboard.isKeyPressed('A' + i)) {
+                                        anyKeyPressed = true;
+                                        break;
+                                    }
+                                }
+                                if (anyKeyPressed) { delay(50); continue; }
+                                
+                                // 检查数字键
+                                for (int i = 0; i < 10; i++) {
+                                    if (M5Cardputer.Keyboard.isKeyPressed('0' + i)) {
+                                        anyKeyPressed = true;
+                                        break;
+                                    }
+                                }
+                                if (anyKeyPressed) { delay(50); continue; }
+                                
+                                // 检查特殊键
+                                if (M5Cardputer.Keyboard.isKeyPressed(' ') || 
+                                    M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE) ||
+                                    M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) ||
+                                    M5Cardputer.Keyboard.isKeyPressed(';') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('.') ||
+                                    M5Cardputer.Keyboard.isKeyPressed(',') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('/') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('`')) {
+                                    anyKeyPressed = true;
+                                }
+                                
+                                if (anyKeyPressed) {
+                                    delay(50);
                                 }
                             }
-                            return;
+                            
+                            // 然后等待用户按下任意键
+                            while (true) {
+                                M5Cardputer.update();
+                                if (M5Cardputer.Keyboard.isKeyPressed(' ') || 
+                                    M5Cardputer.Keyboard.isKeyPressed('\n') || 
+                                    M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE) ||
+                                    M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) ||
+                                    M5Cardputer.Keyboard.isKeyPressed(';') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('.') ||
+                                    M5Cardputer.Keyboard.isKeyPressed(',') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('/') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('`')) {
+                                    showStartScreen();
+                                    return;
+                                }
+                                delay(50);
+                            }
+                        }
+                        
+                        // SD卡初始化成功，检查存档是否存在
+                        if (SD.exists(CHESS_SAVE_FILE)) {
+                            if (loadBoardState()) {
+                                isGameStarted = true;
+                                // 加载后重设AI走棋记录
+                                aiLastMoveFrom = Position(-1, -1);
+                                aiLastMoveTo = Position(-1, -1);
+                                // 重绘游戏界面
+                                drawGameScreen();
+                                // 如果现在是AI的回合，AI需要走棋
+                                if (chessBoard.getCurrentPlayer() != (isWhitePlayer ? Color::WHITE : Color::BLACK)) {
+                                    delay(500); // 短暂延迟
+                                    Color aiColor = chessBoard.getCurrentPlayer();
+                                    Move aiMove = chooseAIMove(aiColor, chessBoard);
+                                    if (aiMove.from.isValid() && aiMove.to.isValid()) {
+                                        // 记录AI走棋的起始位置和目标位置
+                                        aiLastMoveFrom = aiMove.from;
+                                        aiLastMoveTo = aiMove.to;
+                                        chessBoard.movePiece(aiMove.from, aiMove.to);
+                                        // 保存AI移动后的棋盘状态
+                                        saveBoardState();
+                                        // 重绘游戏界面
+                                        drawGameScreen();
+                                    }
+                                }
+                                return;
+                            } else {
+                                // 加载失败，显示错误信息
+                                canvas->fillScreen(COLOR_BLACK);
+                                canvas->setTextColor(COLOR_WHITE);
+                                canvas->setTextSize(1);
+                                canvas->setTextDatum(CC_DATUM);
+                                canvas->drawString("Failed to load game", 120, 60);
+                                canvas->drawString("Press any key to return", 120, 80);
+                                canvas->pushSprite(0, 0);
+                                
+                                // 首先等待所有按键释放，清除当前按键状态
+                                bool anyKeyPressed = true;
+                                while (anyKeyPressed) {
+                                    M5Cardputer.update();
+                                    anyKeyPressed = false;
+                                    
+                                    // 检查字母键
+                                    for (int i = 0; i < 26; i++) {
+                                        if (M5Cardputer.Keyboard.isKeyPressed('a' + i) || M5Cardputer.Keyboard.isKeyPressed('A' + i)) {
+                                            anyKeyPressed = true;
+                                            break;
+                                        }
+                                    }
+                                    if (anyKeyPressed) { delay(50); continue; }
+                                    
+                                    // 检查数字键
+                                    for (int i = 0; i < 10; i++) {
+                                        if (M5Cardputer.Keyboard.isKeyPressed('0' + i)) {
+                                            anyKeyPressed = true;
+                                            break;
+                                        }
+                                    }
+                                    if (anyKeyPressed) { delay(50); continue; }
+                                    
+                                    // 检查特殊键
+                                    if (M5Cardputer.Keyboard.isKeyPressed(' ') || 
+                                        M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE) ||
+                                        M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) ||
+                                        M5Cardputer.Keyboard.isKeyPressed(';') ||
+                                        M5Cardputer.Keyboard.isKeyPressed('.') ||
+                                        M5Cardputer.Keyboard.isKeyPressed(',') ||
+                                        M5Cardputer.Keyboard.isKeyPressed('/') ||
+                                        M5Cardputer.Keyboard.isKeyPressed('`')) {
+                                        anyKeyPressed = true;
+                                    }
+                                    
+                                    if (anyKeyPressed) {
+                                        delay(50);
+                                    }
+                                }
+                                
+                                // 然后等待用户按下任意键
+                                while (true) {
+                                    M5Cardputer.update();
+                                    
+                                    // 检查字母键
+                                    for (int i = 0; i < 26; i++) {
+                                        if (M5Cardputer.Keyboard.isKeyPressed('a' + i) || M5Cardputer.Keyboard.isKeyPressed('A' + i)) {
+                                            showStartScreen();
+                                            return;
+                                        }
+                                    }
+                                    
+                                    // 检查数字键
+                                    for (int i = 0; i < 10; i++) {
+                                        if (M5Cardputer.Keyboard.isKeyPressed('0' + i)) {
+                                            showStartScreen();
+                                            return;
+                                        }
+                                    }
+                                    
+                                    // 检查特殊键
+                                    if (M5Cardputer.Keyboard.isKeyPressed(' ') || 
+                                        M5Cardputer.Keyboard.isKeyPressed('\n') || 
+                                        M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE) ||
+                                        M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) ||
+                                        M5Cardputer.Keyboard.isKeyPressed(';') ||
+                                        M5Cardputer.Keyboard.isKeyPressed('.') ||
+                                        M5Cardputer.Keyboard.isKeyPressed(',') ||
+                                        M5Cardputer.Keyboard.isKeyPressed('/') ||
+                                        M5Cardputer.Keyboard.isKeyPressed('`')) {
+                                        showStartScreen();
+                                        return;
+                                    }
+                                    
+                                    delay(50);
+                                }
+                            }
                         } else {
-                            // 加载失败，返回开始界面
+                            // 没有存档文件，显示错误信息
+                            canvas->fillScreen(COLOR_BLACK);
+                            canvas->setTextColor(COLOR_WHITE);
+                            canvas->setTextSize(1);
+                            canvas->setTextDatum(CC_DATUM);
+                            canvas->drawString("No saved game", 120, 60);
+                            canvas->drawString("Press any key to return", 120, 80);
+                            canvas->pushSprite(0, 0);
+                            
+                            // 首先等待所有按键释放，清除当前按键状态
+                            bool anyKeyPressed = true;
+                            while (anyKeyPressed) {
+                                M5Cardputer.update();
+                                anyKeyPressed = false;
+                                
+                                // 检查字母键
+                                for (int i = 0; i < 26; i++) {
+                                    if (M5Cardputer.Keyboard.isKeyPressed('a' + i) || M5Cardputer.Keyboard.isKeyPressed('A' + i)) {
+                                        anyKeyPressed = true;
+                                        break;
+                                    }
+                                }
+                                if (anyKeyPressed) { delay(50); continue; }
+                                
+                                // 检查数字键
+                                for (int i = 0; i < 10; i++) {
+                                    if (M5Cardputer.Keyboard.isKeyPressed('0' + i)) {
+                                        anyKeyPressed = true;
+                                        break;
+                                    }
+                                }
+                                if (anyKeyPressed) { delay(50); continue; }
+                                
+                                // 检查特殊键
+                                if (M5Cardputer.Keyboard.isKeyPressed(' ') || 
+                                    M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE) ||
+                                    M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) ||
+                                    M5Cardputer.Keyboard.isKeyPressed(';') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('.') ||
+                                    M5Cardputer.Keyboard.isKeyPressed(',') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('/') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('`')) {
+                                    anyKeyPressed = true;
+                                }
+                                
+                                if (anyKeyPressed) {
+                                    delay(50);
+                                }
+                            }
+                            
+                            // 然后等待用户按下任意键
+                            while (true) {
+                                M5Cardputer.update();
+                                
+                                // 检查字母键
+                                for (int i = 0; i < 26; i++) {
+                                    if (M5Cardputer.Keyboard.isKeyPressed('a' + i) || M5Cardputer.Keyboard.isKeyPressed('A' + i)) {
+                                        showStartScreen();
+                                        return;
+                                    }
+                                }
+                                
+                                // 检查数字键
+                                for (int i = 0; i < 10; i++) {
+                                    if (M5Cardputer.Keyboard.isKeyPressed('0' + i)) {
+                                        showStartScreen();
+                                        return;
+                                    }
+                                }
+                                
+                                // 检查特殊键
+                                if (M5Cardputer.Keyboard.isKeyPressed(' ') || 
+                                    M5Cardputer.Keyboard.isKeyPressed('\n') || 
+                                    M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE) ||
+                                    M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) ||
+                                    M5Cardputer.Keyboard.isKeyPressed(';') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('.') ||
+                                    M5Cardputer.Keyboard.isKeyPressed(',') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('/') ||
+                                    M5Cardputer.Keyboard.isKeyPressed('`')) {
+                                    showStartScreen();
+                                    return;
+                                }
+                                
+                                delay(50);
+                            }
+                        }
+                    } else if (selectedOption == 4) {
+                        // 谜题模式
+                        isPuzzleMode = true;
+                        // 加载谜题
+                        puzzles = Puzzle::loadPuzzles("");
+                        if (puzzles.empty()) {
+                            // 谜题加载失败，返回主菜单
+                            isPuzzleMode = false;
                             showStartScreen();
                             return;
                         }
-                    } else {
-                        // 没有存档文件，返回开始界面
-                        showStartScreen();
-                        return;
-                    }
-                }
-                
-                // 开始新游戏
-                isGameStarted = true;
-                // 初始化棋盘
-                chessBoard.initBoard();
-                // 重置AI走棋记录
-                aiLastMoveFrom = Position(-1, -1);
-                aiLastMoveTo = Position(-1, -1);
-                // 设置光标初始位置
-                if (!isWhitePlayer) {
-                    cursorX = 0;
-                    cursorY = 7;
-                } else {
-                    cursorX = 0;
-                    cursorY = 0;
-                }
-                
-                // 重绘游戏界面
-                drawGameScreen();
-                
-                // 如果玩家选择黑方，AI（白方）需要先走棋
-                if (!isWhitePlayer) {
-                    delay(500); // 短暂延迟
-                    Color aiColor = Color::WHITE;
-                    Move aiMove = chooseAIMove(aiColor, chessBoard);
-                    if (aiMove.from.isValid() && aiMove.to.isValid()) {
-                        // 记录AI走棋的起始位置和目标位置
-                        aiLastMoveFrom = aiMove.from;
-                        aiLastMoveTo = aiMove.to;
-                        chessBoard.movePiece(aiMove.from, aiMove.to);
-                        // 保存AI移动后的棋盘状态
-                        saveBoardState();
+                        // 随机选择一个谜题
+                        currentPuzzleIndex = random(0, puzzles.size());
+                        currentPuzzle = puzzles[currentPuzzleIndex];
+                        
+                        // 开始新游戏
+                        isGameStarted = true;
+                        // 从FEN加载棋盘
+                        chessBoard.fromFEN(currentPuzzle.getFEN());
+                        // 根据谜题的当前走棋方设置玩家颜色
+                        isWhitePlayer = (currentPuzzle.getSideToMove() == Color::WHITE);
+                        // 重置光标位置
+                        if (!isWhitePlayer) {
+                            cursorX = 0;
+                            cursorY = 7;
+                        } else {
+                            cursorX = 0;
+                            cursorY = 0;
+                        }
+                        // 重置AI走棋记录
+                        aiLastMoveFrom = Position(-1, -1);
+                        aiLastMoveTo = Position(-1, -1);
+                        // 重置当前走法索引
+                        currentMoveIndex = 0;
+                        
                         // 重绘游戏界面
                         drawGameScreen();
+                        return;
                     }
+                    
+                    // 开始新游戏
+                    isGameStarted = true;
+                    // 初始化棋盘
+                    chessBoard.initBoard();
+                    // 重置AI走棋记录
+                    aiLastMoveFrom = Position(-1, -1);
+                    aiLastMoveTo = Position(-1, -1);
+                    // 设置光标初始位置
+                    if (!isWhitePlayer) {
+                        cursorX = 0;
+                        cursorY = 7;
+                    } else {
+                        cursorX = 0;
+                        cursorY = 0;
+                    }
+                    
+                    // 重绘游戏界面
+                    drawGameScreen();
+                    
+                    // 如果玩家选择黑方，AI（白方）需要先走棋
+                    if (!isWhitePlayer) {
+                        delay(500); // 短暂延迟
+                        Color aiColor = Color::WHITE;
+                        Move aiMove = chooseAIMove(aiColor, chessBoard);
+                        if (aiMove.from.isValid() && aiMove.to.isValid()) {
+                            // 记录AI走棋的起始位置和目标位置
+                            aiLastMoveFrom = aiMove.from;
+                            aiLastMoveTo = aiMove.to;
+                            chessBoard.movePiece(aiMove.from, aiMove.to);
+                            // 保存AI移动后的棋盘状态
+                            saveBoardState();
+                            // 重绘游戏界面
+                            drawGameScreen();
+                        }
+                    }
+                } else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+                    // 上箭头 - 选择上一个选项
+                    selectedOption = (selectedOption - 1 + 5) % 5;
+                    showStartScreen();
+                } else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+                    // 下箭头 - 选择下一个选项
+                    selectedOption = (selectedOption + 1) % 5;
+                    showStartScreen();
                 }
-            } else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
-                // 上箭头 - 选择上一个选项
-                selectedOption = (selectedOption - 1 + 4) % 4;
-                showStartScreen();
-            } else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
-                // 下箭头 - 选择下一个选项
-                selectedOption = (selectedOption + 1) % 4;
-                showStartScreen();
             }
         } else {
                 // 游戏界面的按键处理
@@ -533,51 +865,146 @@ void handleKeyInput() {
                 } else {
                     // 正常游戏状态下的按键处理
                     if (M5Cardputer.Keyboard.isKeyPressed('`')) {
-                        // ESC键 - 显示重置棋盘确认对话框
-                        if (showConfirmDialog("Reset board?")) {
-                            // 重置棋盘
-                            chessBoard.initBoard();
+                        // ESC键处理
+                        if (isPuzzleMode) {
+                            // 谜题模式：直接重置为当前谜题的初始状态
+                            const Puzzle& selectedPuzzle = puzzles[currentPuzzleIndex];
+                            // 加载谜题初始局面
+                            chessBoard.fromFEN(selectedPuzzle.getFEN());
+                            // 重置当前走法索引
+                            currentMoveIndex = 0;
                             // 重置AI走棋记录
                             aiLastMoveFrom = Position(-1, -1);
                             aiLastMoveTo = Position(-1, -1);
                             // 重置光标位置
-                            if (!isWhitePlayer) {
+                            // 谜题模式下白棋永远在下方，所以cursorX和cursorY的计算基于白棋视角
+                            bool isWhitePerspective = isPuzzleMode ? true : isWhitePlayer;
+                            if (!isWhitePerspective) {
                                 cursorX = 0;
                                 cursorY = 7;
                             } else {
                                 cursorX = 0;
                                 cursorY = 0;
                             }
-                            // 保存重置后的棋盘状态
-                            saveBoardState();
+                        } else {
+                            // 正常游戏模式：显示重置棋盘确认对话框
+                            if (showConfirmDialog("Reset board?")) {
+                                // 重置棋盘
+                                chessBoard.initBoard();
+                                // 重置AI走棋记录
+                                aiLastMoveFrom = Position(-1, -1);
+                                aiLastMoveTo = Position(-1, -1);
+                                // 重置光标位置
+                                if (!isWhitePlayer) {
+                                    cursorX = 0;
+                                    cursorY = 7;
+                                } else {
+                                    cursorX = 0;
+                                    cursorY = 0;
+                                }
+                                // 保存重置后的棋盘状态
+                                saveBoardState();
+                            }
                         }
                     } else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
                         // 上
-                        if (isWhitePlayer) {
+                        // 根据棋盘朝向调整光标移动方向
+                        bool isWhiteBottom = isPuzzleMode ? true : isWhitePlayer;
+                        if (isWhiteBottom) {
                             cursorY = (cursorY + 1) % 8;
                         } else {
                             cursorY = (cursorY - 1 + 8) % 8;
                         }
                     } else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
                         // 下
-                        if (isWhitePlayer) {
+                        // 根据棋盘朝向调整光标移动方向
+                        bool isWhiteBottom = isPuzzleMode ? true : isWhitePlayer;
+                        if (isWhiteBottom) {
                             cursorY = (cursorY - 1 + 8) % 8;
                         } else {
                             cursorY = (cursorY + 1) % 8;
                         }
                     } else if (M5Cardputer.Keyboard.isKeyPressed(',')) {
                         // 左
-                        if (isWhitePlayer) {
+                        // 根据棋盘朝向调整光标移动方向
+                        bool isWhiteBottom = isPuzzleMode ? true : isWhitePlayer;
+                        if (isWhiteBottom) {
                             cursorX = (cursorX - 1 + 8) % 8;
                         } else {
                             cursorX = (cursorX + 1) % 8;
                         }
                     } else if (M5Cardputer.Keyboard.isKeyPressed('/')) {
                         // 右
-                        if (isWhitePlayer) {
+                        // 根据棋盘朝向调整光标移动方向
+                        bool isWhiteBottom = isPuzzleMode ? true : isWhitePlayer;
+                        if (isWhiteBottom) {
                             cursorX = (cursorX + 1) % 8;
                         } else {
                             cursorX = (cursorX - 1 + 8) % 8;
+                        }
+                    } else if (M5Cardputer.Keyboard.isKeyPressed(KEY_TAB)) {
+                        // TAB键 - 显示提示
+                        if (isPuzzleMode) {
+                            const Puzzle& localPuzzle = puzzles[currentPuzzleIndex];
+                            const std::vector<Move>& mainLine = localPuzzle.getMainLine();
+                            
+                            // 检查是否还有下一步移动
+                            if (currentMoveIndex < mainLine.size()) {
+                                // 获取正确的下一步移动
+                                const Move& correctMove = mainLine[currentMoveIndex];
+                                
+                                // 高亮显示正确的移动
+                                std::vector<Position> tipMoves;
+                                tipMoves.push_back(correctMove.to);
+                                
+                                // 保存当前选中状态
+                                Position savedSelected = chessBoard.getSelectedPiece();
+                                chessBoard.deselectPiece();
+                                
+                                // 重新绘制游戏界面
+                                drawGameScreen();
+                                
+                                // 高亮显示正确的目标位置
+                                int screenX, screenY;
+                                // 使用与drawGameScreen相同的逻辑来确定棋盘朝向
+                                bool isWhiteBottom = isPuzzleMode ? true : isWhitePlayer;
+                                boardToScreen(correctMove.from, screenX, screenY, isWhiteBottom);
+                                canvas->fillRect(screenX, screenY, SQUARE_SIZE, SQUARE_SIZE, COLOR_VALID_MOVE);
+                                // 重新绘制起始位置的棋子
+                                const Piece& piece = chessBoard.getPiece(correctMove.from);
+                                if (!piece.isEmpty()) {
+                                    drawPiece(canvas, piece, screenX, screenY);
+                                }
+                                
+                                // 高亮显示目标位置
+                                boardToScreen(correctMove.to, screenX, screenY, isWhiteBottom);
+                                canvas->fillRect(screenX, screenY, SQUARE_SIZE, SQUARE_SIZE, COLOR_VALID_MOVE);
+                                
+                                // 如果目标位置有棋子，重新绘制
+                                const Piece& targetPiece = chessBoard.getPiece(correctMove.to);
+                                if (!targetPiece.isEmpty()) {
+                                    drawPiece(canvas, targetPiece, screenX, screenY);
+                                }
+                                
+                                canvas->pushSprite(0, 0);
+                                
+                                // 等待玩家按下任何键
+                                while (true) {
+                                    M5Cardputer.update();
+                                    M5Cardputer.Keyboard.updateKeyList();
+                                    if (M5Cardputer.Keyboard.isPressed() > 0) {
+                                        break;
+                                    }
+                                }
+                                
+                                // 恢复选中状态
+                                if (savedSelected.isValid()) {
+                                    chessBoard.selectPiece(savedSelected);
+                                }
+                                
+                                // 重新绘制游戏界面
+                                drawGameScreen();
+                            }
                         }
                     } else if (M5Cardputer.Keyboard.isKeyPressed(' ')) {
                             // 选择/落子
@@ -585,33 +1012,212 @@ void handleKeyInput() {
                             
                             if (chessBoard.getSelectedPiece().isValid()) {
                                 // 尝试移动棋子
-                                if (chessBoard.movePiece(chessBoard.getSelectedPiece(), currentPos)) {
+                            Position fromPos = chessBoard.getSelectedPiece();
+                            if (chessBoard.movePiece(fromPos, currentPos)) {
                                 // 移动成功，switchPlayer is already called inside movePiece
                                 // 取消选中（虽然movePiece也会调用deselectPiece，但确保双重保险）
                                 chessBoard.deselectPiece();
                                 
-                                // 保存玩家移动后的棋盘状态
-                                saveBoardState();
-                                 
-                                // 立即重绘游戏界面，显示玩家的落子效果
-                                drawGameScreen();
-                                
-                                // 检查是否轮到AI走棋
-                                Color aiColor = isWhitePlayer ? Color::BLACK : Color::WHITE;
-                                if (chessBoard.getCurrentPlayer() == aiColor) {
-                                    // AI走棋
-                                Move aiMove = chooseAIMove(aiColor, chessBoard);
-                                if (aiMove.from.isValid() && aiMove.to.isValid()) {
-                                    // 记录AI走棋的起始位置和目标位置
-                                    aiLastMoveFrom = aiMove.from;
-                                    aiLastMoveTo = aiMove.to;
-                                    chessBoard.movePiece(aiMove.from, aiMove.to);
-                                    // 保存AI移动后的棋盘状态
-                                    saveBoardState();
+                                // 谜题模式特殊处理
+                                if (isPuzzleMode) {
+                                    const Puzzle& localPuzzle = puzzles[currentPuzzleIndex];
+                                    const std::vector<Move>& mainLine = localPuzzle.getMainLine();
                                     
-                                    // AI走棋后重绘游戏界面
+                                    // 检查当前走法是否与正解序列匹配
+                                    Move playerMove(fromPos, currentPos);
+                                    if (currentMoveIndex < mainLine.size() && playerMove == mainLine[currentMoveIndex]) {
+                                        // 走法正确，更新走法索引
+                                        currentMoveIndex++;
+                                        
+                                        // 检查是否完成谜题
+                                        if (currentMoveIndex >= mainLine.size()) {
+                                            // 谜题完成，显示完成信息
+                                            canvas->fillScreen(COLOR_BLACK);
+                                            canvas->setTextSize(2);
+                                            canvas->setTextColor(COLOR_WHITE);
+                                            canvas->setTextDatum(CC_DATUM);
+                                            canvas->drawString("Congratulations!", 120, 40);
+                                            canvas->drawString("Puzzle Completed!", 120, 65);
+                                            
+                                            // 显示选项
+                                            canvas->setTextSize(1);
+                                            canvas->drawString("R:Retry", 80, 100);
+                                            canvas->drawString("N:Next Puzzle", 140, 100);
+                                            canvas->drawString("M:Main Menu", 100, 120);
+                                            canvas->pushSprite(0, 0);
+                                            
+                                            // 等待用户输入
+                                            while (true) {
+                                                M5Cardputer.update();
+                                                if (M5Cardputer.Keyboard.isKeyPressed('r') || M5Cardputer.Keyboard.isKeyPressed('R')) {
+                                                    // 重试当前谜题
+                                                    chessBoard.fromFEN(currentPuzzle.getFEN());
+                                                    currentMoveIndex = 0;
+                                                    drawGameScreen();
+                                                    return;
+                                                } else if (M5Cardputer.Keyboard.isKeyPressed('n') || M5Cardputer.Keyboard.isKeyPressed('N')) {
+                                                    // 下一个谜题
+                                                    currentPuzzleIndex = (currentPuzzleIndex + 1) % puzzles.size();
+                                                    currentPuzzle = puzzles[currentPuzzleIndex];
+                                                    chessBoard.fromFEN(currentPuzzle.getFEN());
+                                                    // 谜题模式下白棋永远在下方，所以isWhitePlayer始终为true
+                                                    isWhitePlayer = true;
+                                                    currentMoveIndex = 0;
+                                                    // 重置光标位置
+                                                    if (!isWhitePlayer) {
+                                                        cursorX = 0;
+                                                        cursorY = 7;
+                                                    } else {
+                                                        cursorX = 0;
+                                                        cursorY = 0;
+                                                    }
+                                                    drawGameScreen();
+                                                    return;
+                                                } else if (M5Cardputer.Keyboard.isKeyPressed('m') || M5Cardputer.Keyboard.isKeyPressed('M')) {
+                                                    // 回到主菜单
+                                                    isGameStarted = false;
+                                                    isPuzzleMode = false;
+                                                    currentMoveIndex = 0;
+                                                    showStartScreen();
+                                                    return;
+                                                }
+                                                delay(50);
+                                            }
+                                        }
+                                        
+                                        // 如果还有更多走法，检查是否轮到谜题的下一个走法
+                                        if (currentMoveIndex < mainLine.size()) {
+                                            // 自动执行对手的走法（如果有的话）
+                                            if (currentMoveIndex % 2 != 0) {
+                                                // 延迟一下，让玩家看清楚
+                                                delay(500);
+                                                
+                                                Move nextMove = mainLine[currentMoveIndex];
+                                                chessBoard.movePiece(nextMove.from, nextMove.to);
+                                                aiLastMoveFrom = nextMove.from;
+                                                aiLastMoveTo = nextMove.to;
+                                                currentMoveIndex++;
+                                            }
+                                        }
+                                    } else {
+                                    // 走法错误，撤销当前移动并恢复棋盘状态
+                                    chessBoard.undoMove();
+                                    
+                                    // 显示错误信息
+                                    canvas->setTextColor(COLOR_WHITE, COLOR_BLACK);
+                                    canvas->setTextSize(1);
+                                    const char* wrongMoveText = "Wrong Move!";
+                                    int textWidth = canvas->textWidth(wrongMoveText);
+                                    int textX = canvas->width() - textWidth - 10;
+                                    int textY = 1;
+                                    canvas->drawString(wrongMoveText, textX, textY);
+                                    canvas->pushSprite(0, 0);
+                                    
+                                    // 两阶段按键处理：
+                                    // 1. 首先等待所有按键释放，清除当前按键状态
+                                    bool anyKeyPressed = true;
+                                    while (anyKeyPressed) {
+                                        M5Cardputer.update();
+                                        anyKeyPressed = false;
+                                        
+                                        // 检查字母键
+                                        for (int i = 0; i < 26; i++) {
+                                            if (M5Cardputer.Keyboard.isKeyPressed('a' + i) || M5Cardputer.Keyboard.isKeyPressed('A' + i)) {
+                                                anyKeyPressed = true;
+                                                break;
+                                            }
+                                        }
+                                        if (anyKeyPressed) { delay(50); continue; }
+                                        
+                                        // 检查数字键
+                                        for (int i = 0; i < 10; i++) {
+                                            if (M5Cardputer.Keyboard.isKeyPressed('0' + i)) {
+                                                anyKeyPressed = true;
+                                                break;
+                                            }
+                                        }
+                                        if (anyKeyPressed) { delay(50); continue; }
+                                        
+                                        // 检查特殊键
+                                        if (M5Cardputer.Keyboard.isKeyPressed(' ') || 
+                                            M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE) ||
+                                            M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) ||
+                                            M5Cardputer.Keyboard.isKeyPressed(';') ||
+                                            M5Cardputer.Keyboard.isKeyPressed('.') ||
+                                            M5Cardputer.Keyboard.isKeyPressed(',') ||
+                                            M5Cardputer.Keyboard.isKeyPressed('/') ||
+                                            M5Cardputer.Keyboard.isKeyPressed('`')) {
+                                            anyKeyPressed = true;
+                                        }
+                                        
+                                        if (anyKeyPressed) delay(50);
+                                    }
+                                    
+                                    // 2. 然后等待用户按下新的按键
+                                    bool keyPressed = false;
+                                    while (!keyPressed) {
+                                        M5Cardputer.update(); // 更新输入状态
+                                        // 检查任意按键是否被按下
+                                        for (int i = 0; i < 26; i++) {
+                                            if (M5Cardputer.Keyboard.isKeyPressed('a' + i) || M5Cardputer.Keyboard.isKeyPressed('A' + i)) {
+                                                keyPressed = true;
+                                                break;
+                                            }
+                                        }
+                                        if (keyPressed) break;
+                                        
+                                        // 检查数字键
+                                        for (int i = 0; i < 10; i++) {
+                                            if (M5Cardputer.Keyboard.isKeyPressed('0' + i)) {
+                                                keyPressed = true;
+                                                break;
+                                            }
+                                        }
+                                        if (keyPressed) break;
+                                        
+                                        // 检查特殊键
+                                        if (M5Cardputer.Keyboard.isKeyPressed(' ') || 
+                                            M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE) ||
+                                            M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) ||
+                                            M5Cardputer.Keyboard.isKeyPressed(';') ||
+                                            M5Cardputer.Keyboard.isKeyPressed('.') ||
+                                            M5Cardputer.Keyboard.isKeyPressed(',') ||
+                                            M5Cardputer.Keyboard.isKeyPressed('/') ||
+                                            M5Cardputer.Keyboard.isKeyPressed('`')) {
+                                            keyPressed = true;
+                                        }
+                                        
+                                        delay(50);
+                                    }
+                                    
+                                    // 消除错误信息，重绘游戏界面
                                     drawGameScreen();
-                                }
+                                    }
+                                } else {
+                                    // 正常游戏模式
+                                    // 保存玩家移动后的棋盘状态
+                                    saveBoardState();
+                                      
+                                    // 立即重绘游戏界面，显示玩家的落子效果
+                                    drawGameScreen();
+                                    
+                                    // 检查是否轮到AI走棋
+                                    Color aiColor = isWhitePlayer ? Color::BLACK : Color::WHITE;
+                                    if (chessBoard.getCurrentPlayer() == aiColor) {
+                                        // AI走棋
+                                        Move aiMove = chooseAIMove(aiColor, chessBoard);
+                                        if (aiMove.from.isValid() && aiMove.to.isValid()) {
+                                            // 记录AI走棋的起始位置和目标位置
+                                            aiLastMoveFrom = aiMove.from;
+                                            aiLastMoveTo = aiMove.to;
+                                            chessBoard.movePiece(aiMove.from, aiMove.to);
+                                            // 保存AI移动后的棋盘状态
+                                            saveBoardState();
+                                            
+                                            // AI走棋后重绘游戏界面
+                                            drawGameScreen();
+                                        }
+                                    }
                                 }
                             } else {
                                     // 移动失败，尝试选择新的棋子
@@ -644,9 +1250,6 @@ void setup() {
     canvas = new M5Canvas(&M5Cardputer.Display);
     canvas->createSprite(M5Cardputer.Display.width(), M5Cardputer.Display.height());
     canvas->setTextDatum(TC_DATUM);
-    
-    // 初始化SD卡
-    initializeSDCard();
     
     // 显示开始界面
     showStartScreen();

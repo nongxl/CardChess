@@ -1,0 +1,14 @@
+1.经典转向（黑先）
+6K1/P3QPPP/2R1P3/8/8/1q6/p4ppp/3r2k b - - 0 1
+在1…. Qb1+ 2. Qf1 Qxa2（不是 2.… Rd1 3. Rc8+）之后，黑棋由于a线的通路兵而获得好局。但是由于白棋底线的虚弱，我们可以看得更多：1…. Qb2 2. Rc8!? ( 1…. Qb2 2. Rc2 Qb1+ 3. Qf1 Qxc2；2. Qe1 Qxc3 3. Qxc3 Rd1+ 4. Qe1 Rxe1#) 2…. Qb1+ 3. Qf1 Qxf1+ 4. Kxf1 Rxc8 0-1
+<MOVES>Qb2 Rc8 Qb1+ Qf1 Qxf1+ Kxf1 Rxc8</MOVES>
+
+2.进入兵残局（白先） 
+5RK1/1PP3PP/P1N5/8/2r5/p3pn2/1p2kp1p/8 w - - 0 1
+不是1. Rxf6 Kxf6 2. Ne4+得一子吗？ 不是，黑棋可以这样走1…. Rxc3 当然白棋在2. Rxf7+ Kxf7 3. bxc3 之后白棋还是会赢，但不是因为白棋后翼那个虚弱的多兵，而是因为它在g线那个有潜力的通路兵。比赛可以这样继续：3…. b5 4. Kf2 Kf6 5. Kf3 Kf5 6. g4+ Ke5 7.h4 h6 8. Ke3 白棋制造出一个g线通路兵，然后和黑棋e线通路兵交换。那时，白王比黑王更接近后翼兵，所以白棋赢。1. +-  (2.70): 1.c4 bxc4 2.c3 a5 3.a4 Kd5 4.g5 hxg5 5.hxg5 e5 6.g6 Ke6 7.g7 Kf7 8.Ke4 Kxg7 9.Kxe5 Kf7 10.Kd5 Ke7 11.Kxc4 2. +-  (1.98): 1.Ke3 Kd5 2.Kf4 e5+ 3.Kf5 e4 4.Kf4 a5 5.g5 h5 6.g6 Ke6 7.Kxe4 Kf6 8.Kd4 
+<MOVES>c4 bxc4 c3 a5 a4 Kd5 g5 hxg5 hxg5 e5 g6 Ke6 g7 Kf7 Ke4 Kxg7 Kxe5 Kf7 Kd5</MOVES>
+
+3.占线和刺入（白先）
+2R3K1/P3QPPP/BP1BPN2/3Pn3/3p4/pp4p1/Nb2ppb1/1n1q1rk1 w - - 0 1
+加强对c线的攻击导致第7线的刺入。 1. Qc2 Qd7 2. Qc7 白棋拥有压倒性优势。在 2…. Ba8（防止 3.Qxd7 Nxd7 4.Rc7）3.Nc8 Bf6 4. Qxb8 Bc6 5. Bxa6 后白棋获胜。
+<MOVES>Qc2 Qd7 Qc7 Ba8 Nc8 Bf6 Qxb8 Bc6 Bxa6</MOVES>
